@@ -17,7 +17,7 @@
 
 ## What is included
 
-**Storefront** — home page, catalogue with search and filters (category, brand, device, price, stock), product pages with images, specifications, compatibility, stock, warranty and reviews, cart, coupon codes, checkout (guest or signed in), order confirmation and tracking, wishlist, customer account, wholesale application, about/contact/FAQ and policy pages.
+**Storefront** — home page, catalogue with search and filters (category, brand, device, price, stock), product pages with images, specifications, compatibility, stock, warranty and reviews, direct WhatsApp product enquiries (using the number configured in Admin › Settings), cart, coupon codes, checkout (guest or signed in), order confirmation and tracking, wishlist, customer account, wholesale application, about/contact/FAQ and policy pages.
 
 **Wholesale** — customers apply, staff approve. Only approved accounts see wholesale prices, and only at or above each product's minimum quantity. Extra bulk tiers and customer groups are supported.
 

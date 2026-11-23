@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { getViewer } from "@/lib/viewer";
 import { wishlistProductIds } from "@/services/account";
 import { getProductDetail, getProductReviews, getRelatedProducts } from "@/services/catalog";
+import { getSetting } from "@/services/settings";
 import { RETAIL_CONTEXT } from "@/services/pricing";
 
 type Props = { params: Promise<{ slug: string }> };
@@ -34,9 +35,16 @@ export default async function ProductPage({ params }: Props) {
   const { user, pricing } = await getViewer();
   const [product, pub] = await Promise.all([getProductDetail({ slug }, pricing), publicProduct(slug)]);
   if (!product || !pub) notFound();
-  const [reviews, related, wishlist] = await Promise.all([getProductReviews(product.id), getRelatedProducts(product, pricing), user ? wishlistProductIds(user.id) : Promise.resolve([] as string[])]);
+  const [reviews, related, wishlist, store] = await Promise.all([getProductReviews(product.id), getRelatedProducts(product, pricing), user ? wishlistProductIds(user.id) : Promise.resolve([] as string[]), getSetting("store")]);
 
   const url = `${env.appUrl}/products/${product.slug}`;
+  // WhatsApp expects an international number without +, spaces or punctuation.
+  // Admins may enter either 080... or +234... in Store settings.
+  const rawWhatsApp = store.whatsapp.replace(/\D/g, "");
+  const whatsappNumber = rawWhatsApp.startsWith("0") ? `234${rawWhatsApp.slice(1)}` : rawWhatsApp;
+  const whatsappHref = /^\d{10,15}$/.test(whatsappNumber)
+    ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hi AUREX, I’m interested in ${product.name}. Please confirm availability and compatibility. ${url}`)}`
+    : null;
   const abs = (u: string) => (u.startsWith("/") ? `${env.appUrl}${u}` : u);
   const jsonLd = [
     {
@@ -121,9 +129,16 @@ export default async function ProductPage({ params }: Props) {
             ) : (
               <p className="mt-2 text-sm text-muted">Compatibility has not been listed for this item. Ask us before ordering.</p>
             )}
-            <OpenChatButton className="link mt-3 text-sm" text={`Will the ${product.name} fit my phone?`}>
-              Not sure it fits? Ask the assistant →
-            </OpenChatButton>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <OpenChatButton className="link text-sm" text={`Will the ${product.name} fit my phone?`}>
+                Not sure it fits? Ask the assistant →
+              </OpenChatButton>
+              {whatsappHref ? (
+                <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className="link inline-flex items-center gap-1.5 text-sm" aria-label={`Ask AUREX about ${product.name} on WhatsApp`}>
+                  Ask on WhatsApp ↗
+                </a>
+              ) : null}
+            </div>
           </section>
 
           <ul className="mt-5 grid gap-3 text-sm text-muted sm:grid-cols-3">
