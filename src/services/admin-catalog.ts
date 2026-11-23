@@ -41,7 +41,7 @@ export const productInputSchema = z
     isUniversal: z.boolean().default(false),
     specs: z.record(z.string().trim().min(1).max(60), z.string().trim().max(300)).default({}),
     images: z.array(z.object({ url: imageUrl, alt: z.string().trim().max(200).nullable().optional(), publicId: z.string().max(300).nullable().optional() })).max(12).default([]),
-    deviceIds: z.array(z.string().uuid()).max(500).default([]),
+    deviceIds: z.array(z.union([z.string().uuid(), z.object({ deviceModelId: z.string().uuid(), confidence: z.enum(["VERIFIED", "MANUFACTURER", "SELLER", "AI_SUGGESTED", "UNCONFIRMED"]).default("UNCONFIRMED"), note: z.string().trim().max(300).nullable().optional() })])).max(500).default([]),
     variants: z.array(variantInputSchema).min(1, "Add at least one variant").max(30),
   })
   .superRefine((v, ctx) => {
@@ -97,8 +97,10 @@ export async function saveProduct(raw: ProductInput, actorId: string | null, pro
       if (input.images.length) await tx.insert(productImages).values(input.images.map((im, i) => ({ productId: id!, url: im.url, alt: im.alt || input.name, publicId: im.publicId ?? null, sortOrder: i })));
 
       await tx.delete(productCompatibility).where(eq(productCompatibility.productId, id));
-      const deviceIds = input.isUniversal ? [] : [...new Set(input.deviceIds)];
-      if (deviceIds.length) await tx.insert(productCompatibility).values(deviceIds.map((d) => ({ productId: id!, deviceModelId: d })));
+      const compatEntries = input.isUniversal ? [] : input.deviceIds.map((d) => typeof d === "string" ? { deviceModelId: d, confidence: "UNCONFIRMED" as const, note: null as string | null } : { deviceModelId: d.deviceModelId, confidence: d.confidence, note: d.note ?? null });
+      const seen = new Set<string>();
+      const deduped = compatEntries.filter((e) => { if (seen.has(e.deviceModelId)) return false; seen.add(e.deviceModelId); return true; });
+      if (deduped.length) await tx.insert(productCompatibility).values(deduped.map((d) => ({ productId: id!, deviceModelId: d.deviceModelId, confidence: d.confidence, note: d.note, source: d.confidence === "AI_SUGGESTED" ? "ai" : "admin" })));
 
       const existing = await tx.select().from(productVariants).where(and(eq(productVariants.productId, id), isNull(productVariants.deletedAt)));
       const keep = new Set<string>();

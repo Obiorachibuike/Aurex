@@ -53,20 +53,51 @@ export const resendChannel: MessageChannel = {
   },
 };
 
+function normalizeWhatsAppNumber(to: string): string {
+  const digits = to.replace(/[^\d]/g, "");
+  if (digits.startsWith("0")) return `234${digits.slice(1)}`;
+  return digits;
+}
+
 /**
- * WhatsApp Cloud API channel placeholder: the queue already supports channel = WHATSAPP,
- * so adding delivery later only requires implementing this interface.
+ * WhatsApp Cloud API channel. Sends plain text messages when WHATSAPP_ACCESS_TOKEN and
+ * WHATSAPP_PHONE_NUMBER_ID are configured. Business-initiated messages outside the 24h
+ * customer service window require approved templates in Meta Business Manager.
  */
 export const whatsappChannel: MessageChannel = {
-  async send() {
-    return { delivered: false, detail: "WhatsApp channel not configured" };
+  async send(msg) {
+    if (!env.whatsapp.accessToken || !env.whatsapp.phoneNumberId) {
+      logInfo("whatsapp.skipped (not configured)", { to: msg.to, subject: msg.subject });
+      return { delivered: false, detail: "WhatsApp Cloud API not configured" };
+    }
+    const to = normalizeWhatsAppNumber(msg.to);
+    if (!to) return { delivered: false, detail: "Invalid WhatsApp recipient" };
+    const body = `${msg.subject}\n\n${msg.text}`.slice(0, 4096);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`https://graph.facebook.com/${env.whatsapp.apiVersion}/${env.whatsapp.phoneNumberId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.whatsapp.accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body } }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`WhatsApp API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      return { delivered: true };
+    } finally {
+      clearTimeout(timeout);
+    }
   },
 };
 
 const MAX_ATTEMPTS = 5;
 
+const inAppChannel: MessageChannel = { async send() { return { delivered: true, detail: "in-app" }; } };
+const pushChannel: MessageChannel = { async send() { return { delivered: false, detail: "Push not configured" }; } };
+
 /** Delivers queued notifications. Safe to run concurrently (rows are claimed with SKIP LOCKED). */
-export async function dispatchQueuedNotifications(limit = 25, channels: { EMAIL: MessageChannel; WHATSAPP: MessageChannel } = { EMAIL: resendChannel, WHATSAPP: whatsappChannel }): Promise<{ sent: number; skipped: number; failed: number }> {
+export async function dispatchQueuedNotifications(limit = 25, channels: Partial<Record<"EMAIL" | "WHATSAPP" | "IN_APP" | "PUSH", MessageChannel>> = {}): Promise<{ sent: number; skipped: number; failed: number }> {
+  const resolved = { EMAIL: resendChannel, WHATSAPP: whatsappChannel, IN_APP: inAppChannel, PUSH: pushChannel, ...channels };
   const settings = await getSetting("notifications");
   const stats = { sent: 0, skipped: 0, failed: 0 };
   const claimed = await db.transaction(async (tx) => {
@@ -83,7 +114,8 @@ export async function dispatchQueuedNotifications(limit = 25, channels: { EMAIL:
   for (const n of claimed) {
     try {
       const rendered = renderTemplate(n.template as TemplateKey, n.payload, settings.templates[n.template]);
-      const result = settings.emailEnabled || n.channel !== "EMAIL" ? await channels[n.channel].send({ to: n.recipient, ...rendered }) : { delivered: false, detail: "Email disabled in settings" };
+      const channelEnabled = n.channel === "EMAIL" ? settings.emailEnabled : n.channel === "WHATSAPP" ? settings.whatsappEnabled : n.channel === "IN_APP";
+      const result = channelEnabled ? await resolved[n.channel as keyof typeof resolved]!.send({ to: n.recipient, ...rendered }) : { delivered: false, detail: `${n.channel} disabled in settings` };
       await db
         .update(notifications)
         .set(result.delivered ? { status: "SENT", sentAt: new Date(), error: null } : { status: "SKIPPED", error: result.detail ?? null })
