@@ -13,6 +13,7 @@ import { postAgentMessage } from "@/services/ai/agent";
 import { audit } from "@/services/audit";
 import { clearCatalogCache } from "@/services/catalog";
 import { adjustStock } from "@/services/inventory";
+import { createSupplier, createWarehouse } from "@/services/procurement";
 import { dispatchQueuedNotifications } from "@/services/notifications";
 import type { OrderStatus } from "@/services/order-shared";
 import { cancelOrder, decideRefund, updateFulfilmentStatus } from "@/services/orders";
@@ -379,8 +380,45 @@ export async function saveNotificationSettingsAction(_p: S, fd: FormData): Promi
       const subject = str(fd, `subject:${key}`).slice(0, 200), intro = str(fd, `intro:${key}`).slice(0, 1500);
       if (subject || intro) templates[key] = { ...(subject ? { subject } : {}), ...(intro ? { intro } : {}) };
     }
-    await updateSetting("notifications", { lowStockEmail: email("lowStockEmail"), newOrderEmail: email("newOrderEmail"), emailEnabled: bool(fd, "emailEnabled"), templates }, actor.id);
+    await updateSetting("notifications", { lowStockEmail: email("lowStockEmail"), newOrderEmail: email("newOrderEmail"), emailEnabled: bool(fd, "emailEnabled"), whatsappEnabled: bool(fd, "whatsappEnabled"), templates }, actor.id);
     await audit({ actorId: actor.id, action: "settings.notifications", entityType: "settings", entityId: "notifications" });
     return { message: "Notification settings saved" };
+  });
+}
+
+/* ───────────────────────────── Procurement ───────────────────────────── */
+
+export async function createSupplierAction(_p: S, fd: FormData): Promise<S> {
+  return runAction(async () => {
+    const actor = await requirePermission("inventory.manage");
+    await createSupplier({
+      name: str(fd, "name"),
+      contactName: optStr(fd, "contactName"),
+      email: optStr(fd, "email"),
+      phone: optStr(fd, "phone"),
+      address: optStr(fd, "address"),
+      leadTimeDays: optInt(fd, "leadTimeDays") ?? undefined,
+      paymentTerms: optStr(fd, "paymentTerms"),
+      notes: optStr(fd, "notes"),
+    }, actor.id);
+    revalidatePath("/admin/suppliers");
+    return { message: "Supplier created" };
+  });
+}
+
+export async function createWarehouseAction(_p: S, fd: FormData): Promise<S> {
+  return runAction(async () => {
+    const actor = await requirePermission("inventory.manage");
+    await createWarehouse({
+      name: str(fd, "name"),
+      code: str(fd, "code"),
+      address: optStr(fd, "address"),
+      city: optStr(fd, "city"),
+      state: optStr(fd, "state"),
+      isDefault: bool(fd, "isDefault"),
+    }, actor.id);
+    revalidatePath("/admin/suppliers");
+    revalidatePath("/admin/inventory");
+    return { message: "Warehouse created" };
   });
 }

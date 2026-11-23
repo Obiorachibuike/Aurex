@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { aiConversations, aiMessages, aiToolExecutions, auditLogs, customerGroups, customerProfiles, inventory, inventoryMovements, notifications, orderItems, orders, payments, productVariants, products, roles, supportTickets, userSessions, users, wholesaleApplications } from "@/db/schema";
@@ -138,6 +138,15 @@ export async function listCustomers(filter: { q?: string; segment?: "all" | "who
     db.select({ c: sql<number>`count(*)::int` }).from(users).innerJoin(roles, eq(roles.id, users.roleId)).leftJoin(customerProfiles, eq(customerProfiles.userId, users.id)).where(where),
   ]);
   return { rows: rows.map((r) => ({ ...r, spent: n(r.spent) })), page, total: count?.c ?? 0, pageCount: Math.max(1, Math.ceil((count?.c ?? 0) / pageSize)) };
+}
+
+export async function listStaffUsers() {
+  return db
+    .select({ id: users.id, name: users.name, email: users.email, phone: users.phone, roleKey: roles.key, roleName: roles.name, isSuspended: users.isSuspended, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
+    .from(users)
+    .innerJoin(roles, eq(roles.id, users.roleId))
+    .where(and(eq(roles.isStaff, true), isNull(users.deletedAt)))
+    .orderBy(asc(roles.name), asc(users.name));
 }
 
 export async function getCustomer(userId: string) {

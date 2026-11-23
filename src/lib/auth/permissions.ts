@@ -19,14 +19,26 @@ export const PERMISSIONS = {
 export type PermissionKey = keyof typeof PERMISSIONS;
 const ALL = Object.keys(PERMISSIONS) as PermissionKey[];
 
-export const ROLE_KEYS = ["customer", "wholesale_customer", "support_agent", "inventory_manager", "admin", "super_admin"] as const;
+export const ROLE_KEYS = [
+  "customer",
+  "wholesale_customer",
+  "support_agent",
+  "inventory_manager",
+  "warehouse_staff",
+  "sales_manager",
+  "marketing_manager",
+  "finance_staff",
+  "store_manager",
+  "admin",
+  "super_admin",
+] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
 export const SYSTEM_ROLES: Record<RoleKey, { name: string; description: string; isStaff: boolean; permissions: PermissionKey[] }> = {
   customer: { name: "Customer", description: "Retail customer", isStaff: false, permissions: [] },
   wholesale_customer: { name: "Wholesale customer", description: "Approved wholesale buyer", isStaff: false, permissions: [] },
   support_agent: {
-    name: "Support agent",
+    name: "Customer Support",
     description: "Handles customer service, orders and escalations",
     isStaff: true,
     permissions: ["admin.access", "orders.view", "customers.view", "support.manage"],
@@ -36,6 +48,36 @@ export const SYSTEM_ROLES: Record<RoleKey, { name: string; description: string; 
     description: "Manages catalogue and stock",
     isStaff: true,
     permissions: ["admin.access", "products.manage", "inventory.manage", "orders.view"],
+  },
+  warehouse_staff: {
+    name: "Warehouse staff",
+    description: "Handles stock receiving, picking and warehouse operations",
+    isStaff: true,
+    permissions: ["admin.access", "inventory.manage", "orders.view"],
+  },
+  sales_manager: {
+    name: "Sales manager",
+    description: "Manages orders, customers and sales performance",
+    isStaff: true,
+    permissions: ["admin.access", "orders.view", "orders.manage", "customers.view", "customers.manage", "payments.manage", "audit.view"],
+  },
+  marketing_manager: {
+    name: "Marketing manager",
+    description: "Manages campaigns, coupons and customer engagement",
+    isStaff: true,
+    permissions: ["admin.access", "marketing.manage", "customers.view", "ai.manage"],
+  },
+  finance_staff: {
+    name: "Finance staff",
+    description: "Views payments, refunds and financial reports",
+    isStaff: true,
+    permissions: ["admin.access", "orders.view", "payments.manage", "audit.view"],
+  },
+  store_manager: {
+    name: "Store manager",
+    description: "Manages day-to-day store operations",
+    isStaff: true,
+    permissions: ["admin.access", "products.manage", "inventory.manage", "orders.view", "orders.manage", "customers.view", "customers.manage", "marketing.manage", "support.manage", "ai.manage", "audit.view"],
   },
   admin: {
     name: "Administrator",

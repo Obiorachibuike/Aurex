@@ -42,6 +42,7 @@ export const SETTINGS_DEFAULTS = {
     lowStockEmail: "",
     newOrderEmail: "",
     emailEnabled: true,
+    whatsappEnabled: false,
     /** Per-template overrides: { order_confirmation: { subject, intro } } */
     templates: {} as Record<string, { subject?: string; intro?: string }>,
   },

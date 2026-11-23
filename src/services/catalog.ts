@@ -80,7 +80,7 @@ export type ProductCardView = {
   ratingCount: number;
   defaultVariantId: string | null;
   variants: VariantView[];
-  compatibleDevices: { id: string; label: string }[];
+  compatibleDevices: { id: string; label: string; confidence: "VERIFIED" | "MANUFACTURER" | "SELLER" | "AI_SUGGESTED" | "UNCONFIRMED" }[];
 };
 
 export type ProductDetailView = ProductCardView & {
@@ -155,7 +155,7 @@ function toCard(p: Hydrated, ctx: PricingContext, rules: PriceRule[]): ProductCa
     ratingCount: p.ratingCount,
     defaultVariantId: main?.id ?? null,
     variants,
-    compatibleDevices: p.compatibility.filter((c) => c.device.isActive).map((c) => ({ id: c.deviceModelId, label: `${c.device.brand.name} ${c.device.name}` })).sort((a, b) => a.label.localeCompare(b.label)),
+    compatibleDevices: p.compatibility.filter((c) => c.device.isActive).map((c) => ({ id: c.deviceModelId, label: `${c.device.brand.name} ${c.device.name}`, confidence: c.confidence })).sort((a, b) => a.label.localeCompare(b.label)),
   };
 }
 

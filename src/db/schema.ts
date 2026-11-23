@@ -63,6 +63,11 @@ export const reviewStatus = pgEnum("review_status", ["PENDING", "APPROVED", "REJ
 export const notificationStatus = pgEnum("notification_status", ["QUEUED", "SENT", "FAILED", "SKIPPED"]);
 export const ticketStatus = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "RESOLVED"]);
 export const conversationStatus = pgEnum("ai_conversation_status", ["ACTIVE", "ESCALATED", "CLOSED"]);
+export const compatibilityConfidence = pgEnum("compatibility_confidence", ["VERIFIED", "MANUFACTURER", "SELLER", "AI_SUGGESTED", "UNCONFIRMED"]);
+export const purchaseOrderStatus = pgEnum("purchase_order_status", ["DRAFT", "SUBMITTED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"]);
+export const campaignStatus = pgEnum("campaign_status", ["DRAFT", "SCHEDULED", "ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"]);
+export const campaignChannel = pgEnum("campaign_channel", ["EMAIL", "WHATSAPP", "IN_APP"]);
+export const shipmentStatus = pgEnum("shipment_status", ["PENDING", "PROCESSING", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "FAILED", "RETURNED"]);
 
 /* ───────────────────── Identity & access control ───────────────────── */
 
@@ -99,6 +104,17 @@ export const customerGroups = pgTable("customer_groups", {
   name: text("name").notNull().unique(),
   description: text("description"),
   createdAt: createdAt(),
+});
+
+export const customerSegments = pgTable("customer_segments", {
+  id: id(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** Declarative filter definition used by the segmentation engine. */
+  definition: jsonb("definition").$type<Record<string, unknown>>().notNull().default({}),
+  isSystem: boolean("is_system").notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
 export const users = pgTable(
@@ -163,6 +179,8 @@ export const customerProfiles = pgTable("customer_profiles", {
   businessName: text("business_name"),
   preferences: jsonb("preferences").$type<CustomerPreferences>().notNull().default({}),
   marketingOptIn: boolean("marketing_opt_in").notNull().default(false),
+  whatsappOptIn: boolean("whatsapp_opt_in").notNull().default(false),
+  notes: text("notes"),
   updatedAt: updatedAt(),
 });
 
@@ -303,11 +321,13 @@ export const productVariants = pgTable(
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     sku: text("sku").notNull().unique(),
+    barcode: text("barcode"),
     name: text("name").notNull().default("Standard"),
     attributes: jsonb("attributes").$type<Record<string, string>>().notNull().default({}),
     retailPrice: integer("retail_price").notNull(),
     compareAtPrice: integer("compare_at_price"),
     wholesalePrice: integer("wholesale_price"),
+    costPrice: integer("cost_price"),
     minWholesaleQty: integer("min_wholesale_qty").notNull().default(1),
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
@@ -332,8 +352,14 @@ export const productCompatibility = pgTable(
       .notNull()
       .references(() => deviceModels.id, { onDelete: "cascade" }),
     note: text("note"),
+    confidence: compatibilityConfidence("confidence").notNull().default("UNCONFIRMED"),
+    source: text("source"),
+    verifiedBy: uuid("verified_by").references(() => users.id, { onDelete: "set null" }),
+    verifiedAt: ts("verified_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (t) => [primaryKey({ columns: [t.productId, t.deviceModelId] }), index("product_compat_device_idx").on(t.deviceModelId)],
+  (t) => [primaryKey({ columns: [t.productId, t.deviceModelId] }), index("product_compat_device_idx").on(t.deviceModelId), index("product_compat_confidence_idx").on(t.confidence)],
 );
 
 export const priceHistory = pgTable(
@@ -384,9 +410,159 @@ export const inventoryMovements = pgTable(
     orderId: uuid("order_id"),
     note: text("note"),
     actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    warehouseId: uuid("warehouse_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("inventory_movements_variant_idx").on(t.variantId, t.createdAt), index("inventory_movements_order_idx").on(t.orderId)],
+  (t) => [index("inventory_movements_variant_idx").on(t.variantId, t.createdAt), index("inventory_movements_order_idx").on(t.orderId), index("inventory_movements_warehouse_idx").on(t.warehouseId)],
+);
+
+export const warehouses = pgTable("warehouses", {
+  id: id(),
+  name: text("name").notNull(),
+  code: text("code").notNull().unique(),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  country: text("country").notNull().default("NG"),
+  isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const warehouseLocations = pgTable(
+  "warehouse_locations",
+  {
+    id: id(),
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("warehouse_locations_wh_code_uq").on(t.warehouseId, t.code), index("warehouse_locations_wh_idx").on(t.warehouseId)],
+);
+
+export const warehouseStock = pgTable(
+  "warehouse_stock",
+  {
+    warehouseId: uuid("warehouse_id").notNull().references(() => warehouses.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id").notNull().references(() => productVariants.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id").references(() => warehouseLocations.id, { onDelete: "set null" }),
+    onHand: integer("on_hand").notNull().default(0),
+    reserved: integer("reserved").notNull().default(0),
+    damaged: integer("damaged").notNull().default(0),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.warehouseId, t.variantId] }),
+    index("warehouse_stock_variant_idx").on(t.variantId),
+    check("warehouse_stock_non_negative", sql`${t.onHand} >= 0 and ${t.reserved} >= 0 and ${t.damaged} >= 0`),
+    check("warehouse_stock_reserved_lte", sql`${t.reserved} <= ${t.onHand}`),
+  ],
+);
+
+export const stockTransfers = pgTable(
+  "stock_transfers",
+  {
+    id: id(),
+    fromWarehouseId: uuid("from_warehouse_id").notNull().references(() => warehouses.id),
+    toWarehouseId: uuid("to_warehouse_id").notNull().references(() => warehouses.id),
+    status: text("status", { enum: ["DRAFT", "IN_TRANSIT", "COMPLETED", "CANCELLED"] }).notNull().default("DRAFT"),
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    completedAt: ts("completed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("stock_transfers_from_idx").on(t.fromWarehouseId), index("stock_transfers_to_idx").on(t.toWarehouseId)],
+);
+
+export const stockTransferItems = pgTable(
+  "stock_transfer_items",
+  {
+    id: id(),
+    transferId: uuid("transfer_id").notNull().references(() => stockTransfers.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id").notNull().references(() => productVariants.id),
+    quantity: integer("quantity").notNull(),
+    receivedQuantity: integer("received_quantity").notNull().default(0),
+  },
+  (t) => [index("stock_transfer_items_transfer_idx").on(t.transferId), check("stock_transfer_qty_pos", sql`${t.quantity} > 0 and ${t.receivedQuantity} >= 0`)],
+);
+
+/* ─────────────────────── Suppliers & purchasing ─────────────────────── */
+
+export const suppliers = pgTable("suppliers", {
+  id: id(),
+  name: text("name").notNull(),
+  contactName: text("contact_name"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  country: text("country").notNull().default("NG"),
+  leadTimeDays: integer("lead_time_days"),
+  paymentTerms: text("payment_terms"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const supplierProducts = pgTable(
+  "supplier_products",
+  {
+    id: id(),
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id").notNull().references(() => productVariants.id, { onDelete: "cascade" }),
+    supplierSku: text("supplier_sku"),
+    unitCost: integer("unit_cost").notNull().default(0),
+    currency: text("currency").notNull().default("NGN"),
+    leadTimeDays: integer("lead_time_days"),
+    isPreferred: boolean("is_preferred").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("supplier_products_uq").on(t.supplierId, t.variantId), index("supplier_products_variant_idx").on(t.variantId)],
+);
+
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: id(),
+    number: text("number").notNull().unique(),
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id),
+    warehouseId: uuid("warehouse_id").references(() => warehouses.id, { onDelete: "set null" }),
+    status: purchaseOrderStatus("status").notNull().default("DRAFT"),
+    currency: text("currency").notNull().default("NGN"),
+    subtotal: integer("subtotal").notNull().default(0),
+    shippingCost: integer("shipping_cost").notNull().default(0),
+    taxTotal: integer("tax_total").notNull().default(0),
+    total: integer("total").notNull().default(0),
+    expectedAt: ts("expected_at"),
+    receivedAt: ts("received_at"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("purchase_orders_supplier_idx").on(t.supplierId), index("purchase_orders_status_idx").on(t.status, t.createdAt)],
+);
+
+export const purchaseOrderItems = pgTable(
+  "purchase_order_items",
+  {
+    id: id(),
+    purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id").notNull().references(() => productVariants.id),
+    quantityOrdered: integer("quantity_ordered").notNull(),
+    quantityReceived: integer("quantity_received").notNull().default(0),
+    unitCost: integer("unit_cost").notNull().default(0),
+    lineTotal: integer("line_total").notNull().default(0),
+  },
+  (t) => [index("purchase_order_items_po_idx").on(t.purchaseOrderId), check("po_items_qty", sql`${t.quantityOrdered} > 0 and ${t.quantityReceived} >= 0`)],
 );
 
 /* ─────────────────────── Carts & wishlists ─────────────────────── */
@@ -692,13 +868,95 @@ export const shipments = pgTable(
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
     carrier: text("carrier"),
+    provider: text("provider"),
     trackingNumber: text("tracking_number"),
     trackingUrl: text("tracking_url"),
+    status: shipmentStatus("status").notNull().default("PENDING"),
+    estimatedDeliveryAt: ts("estimated_delivery_at"),
     shippedAt: ts("shipped_at"),
     deliveredAt: ts("delivered_at"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("shipments_order_idx").on(t.orderId), index("shipments_status_idx").on(t.status)],
+);
+
+export const shipmentEvents = pgTable(
+  "shipment_events",
+  {
+    id: id(),
+    shipmentId: uuid("shipment_id").notNull().references(() => shipments.id, { onDelete: "cascade" }),
+    status: shipmentStatus("status").notNull(),
+    location: text("location"),
+    description: text("description"),
+    occurredAt: ts("occurred_at").notNull().defaultNow(),
     createdAt: createdAt(),
   },
-  (t) => [index("shipments_order_idx").on(t.orderId)],
+  (t) => [index("shipment_events_shipment_idx").on(t.shipmentId, t.occurredAt)],
+);
+
+/* ─────────────────────── Marketing & CRM ─────────────────────── */
+
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    description: text("description"),
+    status: campaignStatus("status").notNull().default("DRAFT"),
+    channel: campaignChannel("channel").notNull().default("EMAIL"),
+    segmentId: uuid("segment_id").references(() => customerSegments.id, { onDelete: "set null" }),
+    subject: text("subject"),
+    body: text("body").notNull().default(""),
+    templateKey: text("template_key"),
+    scheduledAt: ts("scheduled_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    /** Aggregate metrics (updated by delivery/track handlers). */
+    metrics: jsonb("metrics").$type<{ sent: number; delivered: number; failed: number; clicks: number; conversions: number }>().notNull().default({ sent: 0, delivered: 0, failed: 0, clicks: 0, conversions: 0 }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("campaigns_status_idx").on(t.status, t.scheduledAt)],
+);
+
+export const campaignRecipients = pgTable(
+  "campaign_recipients",
+  {
+    id: id(),
+    campaignId: uuid("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    email: text("email"),
+    phone: text("phone"),
+    status: text("status", { enum: ["PENDING", "SENT", "FAILED", "SKIPPED", "CLICKED", "CONVERTED"] }).notNull().default("PENDING"),
+    sentAt: ts("sent_at"),
+    clickedAt: ts("clicked_at"),
+    convertedAt: ts("converted_at"),
+    error: text("error"),
+    dedupeKey: text("dedupe_key").unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("campaign_recipients_campaign_idx").on(t.campaignId, t.status)],
+);
+
+export const abandonedCarts = pgTable(
+  "abandoned_carts",
+  {
+    id: id(),
+    cartId: uuid("cart_id").notNull().references(() => carts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    email: text("email"),
+    phone: text("phone"),
+    status: text("status", { enum: ["PENDING", "NOTIFIED", "RECOVERED", "EXPIRED"] }).notNull().default("PENDING"),
+    lastNotifiedAt: ts("last_notified_at"),
+    recoveredAt: ts("recovered_at"),
+    recoveryToken: text("recovery_token").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("abandoned_carts_status_idx").on(t.status, t.createdAt), index("abandoned_carts_cart_idx").on(t.cartId)],
 );
 
 /* ─────────────────────── Reviews & wholesale ─────────────────────── */
@@ -881,7 +1139,7 @@ export const notifications = pgTable(
   {
     id: id(),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
-    channel: text("channel", { enum: ["EMAIL", "WHATSAPP"] }).notNull().default("EMAIL"),
+    channel: text("channel", { enum: ["EMAIL", "WHATSAPP", "IN_APP", "PUSH"] }).notNull().default("EMAIL"),
     recipient: text("recipient").notNull(),
     template: text("template").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
@@ -890,10 +1148,39 @@ export const notifications = pgTable(
     error: text("error"),
     /** Prevents the same business event from notifying twice (e.g. duplicate webhooks). */
     dedupeKey: text("dedupe_key").unique(),
+    readAt: ts("read_at"),
     sentAt: ts("sent_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("notifications_status_idx").on(t.status, t.createdAt)],
+  (t) => [index("notifications_status_idx").on(t.status, t.createdAt), index("notifications_user_idx").on(t.userId, t.createdAt)],
+);
+
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    channel: text("channel", { enum: ["EMAIL", "WHATSAPP", "IN_APP", "PUSH"] }).notNull(),
+    template: text("template").notNull().default("*"),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.channel, t.template] })],
+);
+
+export const aiUsageLogs = pgTable(
+  "ai_usage_logs",
+  {
+    id: id(),
+    conversationId: uuid("conversation_id").references(() => aiConversations.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    model: text("model"),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    estimatedCostUsd: integer("estimated_cost_usd_x10000").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_usage_logs_created_idx").on(t.createdAt), index("ai_usage_logs_user_idx").on(t.userId)],
 );
 
 export const auditLogs = pgTable(
@@ -1018,8 +1305,9 @@ export const refundsRelations = relations(refunds, ({ one }) => ({
   order: one(orders, { fields: [refunds.orderId], references: [orders.id] }),
   payment: one(payments, { fields: [refunds.paymentId], references: [payments.id] }),
 }));
-export const shipmentsRelations = relations(shipments, ({ one }) => ({
+export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
   order: one(orders, { fields: [shipments.orderId], references: [orders.id] }),
+  events: many(shipmentEvents),
 }));
 export const reviewsRelations = relations(reviews, ({ one }) => ({
   product: one(products, { fields: [reviews.productId], references: [products.id] }),
@@ -1045,4 +1333,62 @@ export const supportTicketsRelations = relations(supportTickets, ({ one }) => ({
 }));
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   actor: one(users, { fields: [auditLogs.actorId], references: [users.id] }),
+}));
+
+export const warehousesRelations = relations(warehouses, ({ many }) => ({
+  locations: many(warehouseLocations),
+  stock: many(warehouseStock),
+}));
+export const warehouseLocationsRelations = relations(warehouseLocations, ({ one }) => ({
+  warehouse: one(warehouses, { fields: [warehouseLocations.warehouseId], references: [warehouses.id] }),
+}));
+export const warehouseStockRelations = relations(warehouseStock, ({ one }) => ({
+  warehouse: one(warehouses, { fields: [warehouseStock.warehouseId], references: [warehouses.id] }),
+  variant: one(productVariants, { fields: [warehouseStock.variantId], references: [productVariants.id] }),
+  location: one(warehouseLocations, { fields: [warehouseStock.locationId], references: [warehouseLocations.id] }),
+}));
+export const stockTransfersRelations = relations(stockTransfers, ({ one, many }) => ({
+  fromWarehouse: one(warehouses, { fields: [stockTransfers.fromWarehouseId], references: [warehouses.id] }),
+  toWarehouse: one(warehouses, { fields: [stockTransfers.toWarehouseId], references: [warehouses.id] }),
+  items: many(stockTransferItems),
+}));
+export const stockTransferItemsRelations = relations(stockTransferItems, ({ one }) => ({
+  transfer: one(stockTransfers, { fields: [stockTransferItems.transferId], references: [stockTransfers.id] }),
+  variant: one(productVariants, { fields: [stockTransferItems.variantId], references: [productVariants.id] }),
+}));
+export const suppliersRelations = relations(suppliers, ({ many }) => ({
+  products: many(supplierProducts),
+  purchaseOrders: many(purchaseOrders),
+}));
+export const supplierProductsRelations = relations(supplierProducts, ({ one }) => ({
+  supplier: one(suppliers, { fields: [supplierProducts.supplierId], references: [suppliers.id] }),
+  variant: one(productVariants, { fields: [supplierProducts.variantId], references: [productVariants.id] }),
+}));
+export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
+  supplier: one(suppliers, { fields: [purchaseOrders.supplierId], references: [suppliers.id] }),
+  warehouse: one(warehouses, { fields: [purchaseOrders.warehouseId], references: [warehouses.id] }),
+  items: many(purchaseOrderItems),
+}));
+export const purchaseOrderItemsRelations = relations(purchaseOrderItems, ({ one }) => ({
+  purchaseOrder: one(purchaseOrders, { fields: [purchaseOrderItems.purchaseOrderId], references: [purchaseOrders.id] }),
+  variant: one(productVariants, { fields: [purchaseOrderItems.variantId], references: [productVariants.id] }),
+}));
+export const shipmentEventsRelations = relations(shipmentEvents, ({ one }) => ({
+  shipment: one(shipments, { fields: [shipmentEvents.shipmentId], references: [shipments.id] }),
+}));
+export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
+  segment: one(customerSegments, { fields: [campaigns.segmentId], references: [customerSegments.id] }),
+  recipients: many(campaignRecipients),
+}));
+export const campaignRecipientsRelations = relations(campaignRecipients, ({ one }) => ({
+  campaign: one(campaigns, { fields: [campaignRecipients.campaignId], references: [campaigns.id] }),
+  user: one(users, { fields: [campaignRecipients.userId], references: [users.id] }),
+}));
+export const abandonedCartsRelations = relations(abandonedCarts, ({ one }) => ({
+  cart: one(carts, { fields: [abandonedCarts.cartId], references: [carts.id] }),
+  user: one(users, { fields: [abandonedCarts.userId], references: [users.id] }),
+}));
+export const aiUsageLogsRelations = relations(aiUsageLogs, ({ one }) => ({
+  conversation: one(aiConversations, { fields: [aiUsageLogs.conversationId], references: [aiConversations.id] }),
+  user: one(users, { fields: [aiUsageLogs.userId], references: [users.id] }),
 }));
