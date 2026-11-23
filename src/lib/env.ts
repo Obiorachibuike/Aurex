@@ -46,6 +46,13 @@ export const env = {
     get apiKey() { return process.env.RESEND_API_KEY ?? ""; },
     get from() { return process.env.EMAIL_FROM ?? "AUREX <orders@aurex.ng>"; },
   },
+  whatsapp: {
+    get accessToken() { return process.env.WHATSAPP_ACCESS_TOKEN ?? ""; },
+    get phoneNumberId() { return process.env.WHATSAPP_PHONE_NUMBER_ID ?? ""; },
+    get businessAccountId() { return process.env.WHATSAPP_BUSINESS_ACCOUNT_ID ?? ""; },
+    get apiVersion() { return process.env.WHATSAPP_API_VERSION ?? "v21.0"; },
+    get appSecret() { return process.env.WHATSAPP_APP_SECRET ?? ""; },
+  },
   cloudinary: {
     get cloudName() { return process.env.CLOUDINARY_CLOUD_NAME ?? ""; },
     get apiKey() { return process.env.CLOUDINARY_API_KEY ?? ""; },
