@@ -40,9 +40,9 @@ export default async function ProductPage({ params }: Props) {
   const url = `${env.appUrl}/products/${product.slug}`;
   // WhatsApp expects an international number without +, spaces or punctuation.
   // Admins may enter either 080... or +234... in Store settings.
-  const rawWhatsApp = store.whatsapp.replace(/\\D/g, "");
+  const rawWhatsApp = store.whatsapp.replace(/\D/g, "");
   const whatsappNumber = rawWhatsApp.startsWith("0") ? `234${rawWhatsApp.slice(1)}` : rawWhatsApp;
-  const whatsappHref = /^\\d{10,15}$/.test(whatsappNumber)
+  const whatsappHref = /^\d{10,15}$/.test(whatsappNumber)
     ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hi AUREX, I’m interested in ${product.name}. Please confirm availability and compatibility. ${url}`)}`
     : null;
   const abs = (u: string) => (u.startsWith("/") ? `${env.appUrl}${u}` : u);
