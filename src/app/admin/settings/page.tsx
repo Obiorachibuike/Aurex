@@ -40,6 +40,7 @@ export default async function SettingsAdmin() {
             <Check ok={!!env.paystack.secretKey} label={`Paystack${env.paymentSimulatorEnabled ? " (TEST SIMULATOR — no real money)" : ""}`} detail="PAYSTACK_SECRET_KEY" />
             <Check ok={!!env.flutterwave.secretKey && !!env.flutterwave.webhookHash} label="Flutterwave" detail="FLUTTERWAVE_SECRET_KEY, FLUTTERWAVE_WEBHOOK_HASH" />
             <Check ok={!!env.resend.apiKey} label="Email delivery (Resend)" detail="RESEND_API_KEY, EMAIL_FROM — without it, emails are recorded but not sent" />
+            <Check ok={!!env.whatsapp.accessToken && !!env.whatsapp.phoneNumberId} label="WhatsApp Cloud API" detail="WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID — enables transactional WhatsApp notifications" />
             <Check ok={cloudinaryConfigured()} label="Image uploads (Cloudinary)" detail="CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET" />
             <Check ok={!!env.ai.agnesKey || !!env.ai.openaiKey || !!env.ai.customKey} label="AI model provider" detail="AGNES_API_KEY or OPENAI_API_KEY — without it the built-in engine answers" />
             <Check ok={!!env.cronSecret} label="Scheduled jobs" detail="CRON_SECRET — releases unpaid stock and reconciles payments" />
@@ -65,7 +66,10 @@ export default async function SettingsAdmin() {
 
         <Section title="Notifications">
           <ActionForm action={saveNotificationSettingsAction} className="space-y-4 p-5">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="emailEnabled" defaultChecked={n.emailEnabled} className="check" /> Send emails</label>
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="emailEnabled" defaultChecked={n.emailEnabled} className="check" /> Send emails</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="whatsappEnabled" defaultChecked={n.whatsappEnabled} className="check" /> Send WhatsApp notifications</label>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div><label className="label" htmlFor="ne">New paid order alerts to</label><input id="ne" name="newOrderEmail" type="email" defaultValue={n.newOrderEmail} placeholder="orders@yourstore.ng" className="input" /></div>
               <div><label className="label" htmlFor="le">Low stock alerts to</label><input id="le" name="lowStockEmail" type="email" defaultValue={n.lowStockEmail} className="input" /></div>
@@ -91,10 +95,10 @@ export default async function SettingsAdmin() {
         <Section title="Recent notifications" className="xl:col-span-2">
           <div className="overflow-x-auto">
             <table className="table">
-              <thead><tr><th>When</th><th>Template</th><th>To</th><th>Status</th><th>Detail</th></tr></thead>
+              <thead><tr><th>When</th><th>Channel</th><th>Template</th><th>To</th><th>Status</th><th>Detail</th></tr></thead>
               <tbody>
-                {sent.map((x) => (<tr key={x.id}><td className="whitespace-nowrap text-muted">{formatDate(x.createdAt, true)}</td><td>{TEMPLATE_LABELS[x.template as keyof typeof TEMPLATE_LABELS] ?? x.template}</td><td className="text-muted">{x.recipient}</td><td><StatusBadge status={x.status} /></td><td className="max-w-xs truncate text-xs text-faint">{x.error ?? ""}</td></tr>))}
-                {!sent.length ? <tr><td colSpan={5} className="py-8 text-center text-muted">Nothing sent yet.</td></tr> : null}
+                {sent.map((x) => (<tr key={x.id}><td className="whitespace-nowrap text-muted">{formatDate(x.createdAt, true)}</td><td><span className="badge">{x.channel}</span></td><td>{TEMPLATE_LABELS[x.template as keyof typeof TEMPLATE_LABELS] ?? x.template}</td><td className="text-muted">{x.recipient}</td><td><StatusBadge status={x.status} /></td><td className="max-w-xs truncate text-xs text-faint">{x.error ?? ""}</td></tr>))}
+                {!sent.length ? <tr><td colSpan={6} className="py-8 text-center text-muted">Nothing sent yet.</td></tr> : null}
               </tbody>
             </table>
           </div>

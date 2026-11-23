@@ -1,4 +1,4 @@
-import { Check, Globe, RefreshCcw, ShieldCheck, Truck } from "lucide-react";
+import { Check, Globe, MessageCircle, RefreshCcw, ShieldCheck, Truck } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -15,6 +15,7 @@ import { getViewer } from "@/lib/viewer";
 import { wishlistProductIds } from "@/services/account";
 import { getProductDetail, getProductReviews, getRelatedProducts } from "@/services/catalog";
 import { RETAIL_CONTEXT } from "@/services/pricing";
+import { getSetting } from "@/services/settings";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -32,9 +33,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ProductPage({ params }: Props) {
   const { slug } = await params;
   const { user, pricing } = await getViewer();
-  const [product, pub] = await Promise.all([getProductDetail({ slug }, pricing), publicProduct(slug)]);
+  const [product, pub, store] = await Promise.all([getProductDetail({ slug }, pricing), publicProduct(slug), getSetting("store")]);
   if (!product || !pub) notFound();
   const [reviews, related, wishlist] = await Promise.all([getProductReviews(product.id), getRelatedProducts(product, pricing), user ? wishlistProductIds(user.id) : Promise.resolve([] as string[])]);
+  const waNumber = (store.whatsapp || store.supportPhone || "").replace(/[^\d]/g, "").replace(/^0/, "234");
+  const waText = encodeURIComponent(`Hi AUREX, I'm interested in "${product.name}" (${env.appUrl}/products/${product.slug}). Is it available and compatible with my device?`);
+  const waUrl = waNumber ? `https://wa.me/${waNumber}?text=${waText}` : null;
 
   const url = `${env.appUrl}/products/${product.slug}`;
   const abs = (u: string) => (u.startsWith("/") ? `${env.appUrl}${u}` : u);
@@ -108,22 +112,34 @@ export default async function ProductPage({ params }: Props) {
             ) : product.compatibleDevices.length ? (
               <>
                 <ul className="mt-3 flex flex-wrap gap-2">
-                  {product.compatibleDevices.map((d) => (
-                    <li key={d.id}>
-                      <Link href={`/products?device=${d.id}`} className="badge py-1.5 text-xs hover:border-gold/60 hover:text-gold-bright">
-                        <Check className="size-3.5 text-success" aria-hidden /> {d.label}
-                      </Link>
-                    </li>
-                  ))}
+                  {product.compatibleDevices.map((d) => {
+                    const conf = d.confidence === "VERIFIED" || d.confidence === "MANUFACTURER" ? "Verified" : d.confidence === "SELLER" ? "Seller confirmed" : d.confidence === "AI_SUGGESTED" ? "AI suggested" : "Unconfirmed";
+                    const confClass = d.confidence === "VERIFIED" || d.confidence === "MANUFACTURER" ? "text-success" : d.confidence === "AI_SUGGESTED" ? "text-amber-400" : "text-faint";
+                    return (
+                      <li key={d.id}>
+                        <Link href={`/products?device=${d.id}`} className="badge py-1.5 text-xs hover:border-gold/60 hover:text-gold-bright" title={`Compatibility: ${conf}`}>
+                          <Check className={`size-3.5 ${confClass}`} aria-hidden /> {d.label}
+                          {d.confidence !== "VERIFIED" && d.confidence !== "MANUFACTURER" ? <span className={`ml-1 text-[10px] ${confClass}`}>({conf})</span> : null}
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <p className="mt-3 text-xs leading-relaxed text-faint">Fits only the models listed. Variants with similar names (for example 4G and 5G versions) use different parts — check your exact model in Settings → About phone.</p>
               </>
             ) : (
               <p className="mt-2 text-sm text-muted">Compatibility has not been listed for this item. Ask us before ordering.</p>
             )}
-            <OpenChatButton className="link mt-3 text-sm" text={`Will the ${product.name} fit my phone?`}>
-              Not sure it fits? Ask the assistant →
-            </OpenChatButton>
+            <div className="mt-3 flex flex-wrap gap-3 text-sm">
+              <OpenChatButton className="link" text={`Will the ${product.name} fit my phone?`}>
+                Not sure it fits? Ask the assistant →
+              </OpenChatButton>
+              {waUrl ? (
+                <a href={waUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-success hover:underline" data-testid="whatsapp-enquiry">
+                  <MessageCircle className="size-4" aria-hidden /> Ask on WhatsApp
+                </a>
+              ) : null}
+            </div>
           </section>
 
           <ul className="mt-5 grid gap-3 text-sm text-muted sm:grid-cols-3">
